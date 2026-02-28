@@ -1,0 +1,139 @@
+import processing.serial.*;
+
+Serial myPort;
+
+String data = "";
+int angle = 0;
+int distance = 0;
+
+float radarRadius = 350;
+float maxRange = 40;   // cm
+
+PGraphics fadeLayer;
+
+void setup() {
+  size(900, 900);
+  smooth(8);
+
+  myPort = new Serial(this, "COM9", 9600);
+  myPort.bufferUntil('.');
+
+  fadeLayer = createGraphics(width, height);
+}
+
+void draw() {
+  background(0);
+
+  // fade old detections (phosphor decay)
+  fadeLayer.beginDraw();
+  fadeLayer.noStroke();
+  fadeLayer.fill(0, 35);
+  fadeLayer.rect(0, 0, width, height);
+  fadeLayer.endDraw();
+
+  image(fadeLayer, 0, 0);
+
+  translate(width/2, height/2);
+
+  drawRadarGrid();
+  drawSweep();
+  drawDetection();
+  drawHUD();
+}
+
+//////////////////////////////////////////////////
+void serialEvent(Serial myPort) {
+  data = myPort.readStringUntil('.');
+  if (data == null) return;
+
+  data = trim(data);
+  data = data.substring(0, data.length() - 1);
+
+  String[] parts = split(data, ',');
+
+  if (parts.length == 2) {
+    angle = int(parts[0]);
+    distance = int(parts[1]);
+  }
+}
+
+//////////////////////////////////////////////////
+void drawRadarGrid() {
+  stroke(0, 255, 120);
+  noFill();
+  strokeWeight(1);
+
+  // HALF range rings
+  for (int i = 1; i <= 4; i++) {
+    float r = i * radarRadius / 4.0;
+    arc(0, 0, r * 2, r * 2, PI, TWO_PI);
+
+    fill(0, 255, 120);
+    textSize(14);
+    text(i * 10 + " cm", r - 40, -10);
+    noFill();
+  }
+
+  // angle lines
+  for (int a = 0; a <= 180; a += 15) {
+    float x = radarRadius * cos(radians(a));
+    float y = -radarRadius * sin(radians(a));
+    line(0, 0, x, y);
+  }
+
+  // base line
+  line(-radarRadius, 0, radarRadius, 0);
+}
+
+//////////////////////////////////////////////////
+void drawSweep() {
+  stroke(0, 255, 0);
+  strokeWeight(3);
+
+  float x = radarRadius * cos(radians(angle));
+  float y = -radarRadius * sin(radians(angle));
+
+  line(0, 0, x, y);
+}
+
+//////////////////////////////////////////////////
+void drawDetection() {
+  if (distance > 0 && distance <= maxRange) {
+
+    float r = map(distance, 0, maxRange, 0, radarRadius);
+    float x = r * cos(radians(angle));
+    float y = -r * sin(radians(angle));
+
+    // faint radial line
+    stroke(255, 80, 80, 120);
+    strokeWeight(2);
+    line(0, 0, x, y);
+
+    // draw persistent glow on fade layer
+    fadeLayer.beginDraw();
+    fadeLayer.pushMatrix();
+    fadeLayer.translate(width/2, height/2);
+    fadeLayer.noStroke();
+    fadeLayer.fill(255, 60, 60, 220);
+    fadeLayer.ellipse(x, y, 12, 12);
+    fadeLayer.popMatrix();
+    fadeLayer.endDraw();
+
+    // distance label
+    fill(255, 120, 120);
+    textSize(14);
+    text(distance + " cm", x + 8, y - 8);
+  }
+}
+
+//////////////////////////////////////////////////
+void drawHUD() {
+  resetMatrix();
+  fill(0, 255, 120);
+  textSize(18);
+
+  text("RADAR SCAN", 30, 40);
+  text("Angle : " + angle + "°", 30, 70);
+  text("Distance : " + distance + " cm", 30, 95);
+  text("Range : " + maxRange + " cm", 30, 120);
+}
