@@ -1,0 +1,211 @@
+#include <Servo.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <math.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Ultrasonic
+const int trigPin = 7;
+const int echoPin = 9;
+
+// Servo
+const int servoPin = 10;
+
+// LEDs
+const int greenLED = 5;
+const int redLED = 3;
+
+// Joystick
+const int joyX = A0;
+const int joySW = 12;
+
+const int threshold = 20;   // obstacle distance (cm)
+
+Servo myServo;
+
+long duration;
+int distance;
+
+bool autoMode = true;
+int sweepAngle = 15;
+int direction = 1;
+
+void setup() {
+
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  pinMode(greenLED, OUTPUT);
+  pinMode(redLED, OUTPUT);
+
+  pinMode(joySW, INPUT_PULLUP);
+
+  digitalWrite(greenLED, HIGH);
+  digitalWrite(redLED, LOW);
+
+  myServo.attach(servoPin);
+
+  Serial.begin(9600);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    while (true);
+  }
+
+  display.clearDisplay();
+  display.display();
+}
+
+void loop() {
+
+  checkJoystickButton();
+
+  if (autoMode) {
+    automaticSweepStep();
+  } else {
+    manualControl();
+  }
+}
+
+// ================= MODE SWITCH =================
+
+void checkJoystickButton() {
+
+  static bool lastState = HIGH;
+  bool currentState = digitalRead(joySW);
+
+  if (lastState == HIGH && currentState == LOW) {
+    autoMode = !autoMode;
+    delay(250); // debounce
+  }
+
+  lastState = currentState;
+}
+
+// ================= AUTO SWEEP =================
+
+void automaticSweepStep() {
+
+  myServo.write(sweepAngle);
+
+  distance = calculateDistance();
+
+  controlLEDs(distance);
+  drawRadar(sweepAngle, distance);
+
+  // ---- SERIAL OUTPUT FOR PROCESSING ----
+  Serial.print(sweepAngle);
+  Serial.print(",");
+  Serial.print(distance);
+  Serial.println(".");
+
+  sweepAngle += direction;
+
+  if (sweepAngle >= 165 || sweepAngle <= 15) {
+    direction = -direction;
+  }
+
+  delay(30);
+}
+
+// ================= MANUAL MODE =================
+
+void manualControl() {
+
+  int joyValue = analogRead(joyX);
+  int angle = map(joyValue, 0, 1023, 15, 165);
+
+  myServo.write(angle);
+
+  distance = calculateDistance();
+
+  controlLEDs(distance);
+  drawRadar(angle, distance);
+
+  // ---- SERIAL OUTPUT FOR PROCESSING ----
+  Serial.print(angle);
+  Serial.print(",");
+  Serial.print(distance);
+  Serial.println(".");
+
+  delay(50);
+}
+
+// ================= DISTANCE =================
+
+int calculateDistance() {
+
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH, 30000);
+
+  if (duration == 0) return 0;
+
+  return duration * 0.034 / 2;
+}
+
+// ================= LED CONTROL =================
+
+void controlLEDs(int dist) {
+
+  if (dist > 0 && dist <= threshold) {
+    digitalWrite(redLED, HIGH);
+    digitalWrite(greenLED, LOW);
+  } else {
+    digitalWrite(redLED, LOW);
+    digitalWrite(greenLED, HIGH);
+  }
+}
+
+// ================= RADAR DISPLAY =================
+
+void drawRadar(int angle, int dist) {
+
+  display.clearDisplay();
+
+  int centerX = 64;
+  int centerY = 63;
+  int radius = 60;
+
+  // Semicircle grid
+  for (int r = 20; r <= radius; r += 20) {
+    display.drawCircle(centerX, centerY, r, WHITE);
+  }
+
+  // Mask bottom half
+  display.fillRect(0, centerY, 128, 64 - centerY, BLACK);
+
+  // Baseline
+  display.drawLine(centerX - radius, centerY,
+                   centerX + radius, centerY, WHITE);
+
+  float rad = angle * PI / 180.0;
+
+  // Sweep line
+  int lineX = centerX + radius * cos(rad);
+  int lineY = centerY - radius * sin(rad);
+
+  display.drawLine(centerX, centerY, lineX, lineY, WHITE);
+
+  // Obstacle dot
+  if (dist > 0 && dist <= 100) {
+
+    int scaledDist = map(dist, 0, 100, 0, radius);
+
+    int objX = centerX + scaledDist * cos(rad);
+    int objY = centerY - scaledDist * sin(rad);
+
+    display.fillCircle(objX, objY, 3, WHITE);
+  }
+
+  display.display();
+}
